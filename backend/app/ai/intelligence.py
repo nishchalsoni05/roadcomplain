@@ -160,6 +160,16 @@ class IntelligenceLayer:
                 if timestamp - self._event_cooldown[cooldown_key] < 15.0:
                     continue
 
+            # Child heuristic: significantly shorter than average pedestrian
+            is_child = False
+            if len(pedestrians) > 1:
+                avg_height = sum((p.bbox[3] - p.bbox[1]) for p in pedestrians.values()) / len(pedestrians)
+                ped_height = ped.bbox[3] - ped.bbox[1]
+                if ped_height < avg_height * 0.75:
+                    is_child = True
+            elif ped.class_name == "school_child":  # If detected directly by custom model
+                is_child = True
+
             ped_center = ped.center
             closest_vehicle = None
             min_distance = float('inf')
@@ -179,18 +189,24 @@ class IntelligenceLayer:
                 risk_score = max(0, 1.0 - min_distance / self.PEDESTRIAN_PROXIMITY_THRESHOLD)
                 if closest_vehicle.pixel_speed > 50:
                     risk_score = min(risk_score + 0.2, 1.0)
+                
+                # Higher risk if it's a child
+                if is_child:
+                    risk_score = min(risk_score + 0.2, 1.0)
 
                 if risk_score > 0.4:
                     ml_confidence = (ped.confidence + closest_vehicle.confidence) / 2.0
+                    ped_type = "School child" if is_child else "Pedestrian"
                     events.append(IntelligenceEvent(
                         event_type="pedestrian_risk",
                         confidence=ml_confidence,  # Pure ML confidence average
-                        description=f"Pedestrian at risk: {min_distance:.0f}px from {closest_vehicle.class_name}",
+                        description=f"{ped_type} at risk: {min_distance:.0f}px from {closest_vehicle.class_name}",
                         involved_track_ids=[pid, closest_vehicle.track_id],
                         metadata={
                             "distance_pixels": min_distance,
                             "vehicle_speed": closest_vehicle.pixel_speed,
                             "vehicle_type": closest_vehicle.class_name,
+                            "is_child": is_child
                         }
                     ))
                     self._event_cooldown[cooldown_key] = timestamp

@@ -6,6 +6,7 @@ import GISCommand from './pages/GISCommand'
 import IncidentAnalysis from './pages/IncidentAnalysis'
 import TestHistory from './pages/TestHistory'
 import Analytics from './pages/Analytics'
+import TrafficAnalytics from './pages/TrafficAnalytics'
 import SettingsPage from './pages/Settings'
 import VideoUpload from './pages/VideoUpload'
 import TrainedData from './pages/TrainedData'
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/incidents" element={<IncidentAnalysis />} />
           <Route path="/history" element={<TestHistory />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/traffic-analytics" element={<TrafficAnalytics />} />
           <Route path="/trained-data" element={<TrainedData />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>

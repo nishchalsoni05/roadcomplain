@@ -157,3 +157,142 @@ def detect_vehicle_damage(frame: np.ndarray, vehicle_detections: list) -> list[S
         logger.error(f"Vehicle damage scene analysis error: {e}")
     
     return detections
+
+def detect_missing_zebra(frame: np.ndarray, traffic_light_dets: list) -> list[SceneDetection]:
+    """
+    If a traffic light is detected, look for parallel zebra lines in the lower frame.
+    If lines are very weak or broken, flag as missing_zebra.
+    """
+    detections = []
+    if not traffic_light_dets:
+        return detections
+        
+    try:
+        h, w = frame.shape[:2]
+        # Focus on lower 50%
+        y_offset = int(h * 0.5)
+        lower_region = frame[y_offset:, :]
+        gray = cv2.cvtColor(lower_region, cv2.COLOR_BGR2GRAY)
+        
+        # Adaptive thresholding to find white lines on dark road
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        _, thresh = cv2.threshold(blur, 180, 255, cv2.THRESH_BINARY)
+        
+        # Edge detection & Hough lines
+        edges = cv2.Canny(thresh, 50, 150, apertureSize=3)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
+        
+        line_count = len(lines) if lines is not None else 0
+        
+        # If there's a traffic light, we expect zebra crossings. 
+        # If very few or no strong lines are found, it's missing/faded.
+        if line_count < 3:
+            confidence = 0.7 + (3 - line_count) * 0.1
+            detections.append(SceneDetection(
+                class_name="missing_zebra",
+                confidence=round(confidence, 3),
+                description=f"Faded/Missing zebra crossing at intersection (lines={line_count})",
+                bbox=(0.0, float(y_offset), float(w), float(h))
+            ))
+            logger.info("Scene analysis: missing_zebra detected")
+            
+    except Exception as e:
+        logger.error(f"Missing zebra scene analysis error: {e}")
+        
+    return detections
+
+
+def detect_damaged_divider(frame: np.ndarray) -> list[SceneDetection]:
+    """
+    Detect damaged or missing road dividers by finding the center line and checking continuity.
+    """
+    detections = []
+    try:
+        h, w = frame.shape[:2]
+        y_offset = int(h * 0.4)
+        roi = frame[y_offset:, int(w * 0.25):int(w * 0.75)] # center column
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        
+        edges = cv2.Canny(gray, 50, 150)
+        # Check density of edges in the expected divider region
+        density = cv2.countNonZero(edges) / (roi.shape[0] * roi.shape[1])
+        
+        # If density is extremely low, there might be no divider, but it could just be a flat road.
+        # We flag it if we expect a divided highway. For now, we'll use a heuristic:
+        # High texture variance in the center but lacking straight lines suggests a broken divider.
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, minLineLength=40, maxLineGap=20)
+        
+        texture_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        if lines is None and texture_var > 300 and density > 0.05:
+            # Irregular texture but no straight lines -> possibly broken median
+            bbox = (float(w*0.25), float(y_offset), float(w*0.75), float(h))
+            detections.append(SceneDetection(
+                class_name="damaged_divider",
+                confidence=0.65,
+                description=f"Damaged/Broken road divider detected (var={texture_var:.0f})",
+                bbox=bbox
+            ))
+            logger.info("Scene analysis: damaged_divider detected")
+            
+    except Exception as e:
+        logger.error(f"Damaged divider scene analysis error: {e}")
+        
+    return detections
+
+
+def detect_damaged_signboard(frame: np.ndarray, sign_detections: list) -> list[SceneDetection]:
+    """
+    Check detected traffic signs for severe deformation or defacing.
+    """
+    detections = []
+    try:
+        h, w = frame.shape[:2]
+        for det in sign_detections:
+            if det.class_name not in ('traffic_light', 'stop_sign', 'traffic_object'):
+                continue
+                
+            x1, y1, x2, y2 = [int(c) for c in det.bbox]
+            x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+            crop = frame[y1:y2, x1:x2]
+            
+            if crop.size == 0 or crop.shape[0] < 20 or crop.shape[1] < 20:
+                continue
+                
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            # Find contours inside the sign bounding box. If it's highly irregular, it's damaged.
+            _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if contours:
+                largest = max(contours, key=cv2.contourArea)
+                # Compare bounding rect vs contour area. Standard signs are regular shapes.
+                rect = cv2.minAreaRect(largest)
+                box = cv2.boxPoints(rect)
+                rect_area = cv2.contourArea(box)
+                actual_area = cv2.contourArea(largest)
+                
+                texture_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                
+                is_damaged = False
+                if rect_area > 0:
+                    fill_ratio = actual_area / rect_area
+                    if fill_ratio < 0.8: # Highly irregular shape (bent sign)
+                        is_damaged = True
+                
+                if texture_var > 1000: # Crumpled / faded / graffitied
+                    is_damaged = True
+                        
+                if is_damaged:
+                    detections.append(SceneDetection(
+                        class_name="damaged_signboard",
+                        confidence=0.85,
+                        description=f"Damaged/Deformed traffic sign (var={texture_var:.0f})",
+                        bbox=det.bbox
+                    ))
+                    logger.info("Scene analysis: damaged signboard detected")
+                        
+    except Exception as e:
+        logger.error(f"Damaged signboard scene analysis error: {e}")
+        
+    return detections

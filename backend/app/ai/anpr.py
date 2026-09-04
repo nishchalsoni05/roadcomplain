@@ -73,7 +73,7 @@ class ANPRPipeline:
             logger.info("ANPR: PaddleOCR loaded successfully")
             return
         except ImportError:
-            logger.warning("PaddleOCR not available, trying EasyOCR...")
+            logger.info("PaddleOCR not available, trying EasyOCR...")
         except Exception as e:
             logger.warning(f"PaddleOCR init failed: {e}, trying EasyOCR...")
 

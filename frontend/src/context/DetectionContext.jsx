@@ -28,7 +28,7 @@ export function DetectionProvider({ children }) {
 
     // Extract significant raw detections (pothole, waterlogging, etc.) and log them as events
     if (data.detections) {
-      const defectTypes = ['pothole', 'road_damage', 'waterlogging', 'missing_signage', 'damaged_divider']
+      const defectTypes = ['pothole', 'road_damage', 'waterlogging', 'missing_signage', 'damaged_signboard', 'damaged_divider']
       data.detections.forEach(d => {
         if (defectTypes.includes(d.class_name) && d.confidence >= 0.50) {
           // Debounce: only log the same defect type once every 3 seconds

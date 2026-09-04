@@ -28,6 +28,9 @@ export const getSummaryStats = () => api.get('/api/analytics/summary')
 export const getRoadHealth = () => api.get('/api/analytics/road-health')
 export const getTrends = (days = 30) => api.get(`/api/analytics/trends?days=${days}`)
 export const getMetrics = () => api.get('/api/analytics/metrics')
+export const getHeatmap = () => api.get('/api/analytics/heatmap')
+export const getOriginDestination = () => api.get('/api/analytics/origin-destination')
+export const getRouteDelays = () => api.get('/api/analytics/route-delays')
 
 // Upload
 export const uploadVideo = (file, onProgress) => {

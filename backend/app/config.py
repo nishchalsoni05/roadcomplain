@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     YOLO_POTHOLE_MODEL: Optional[str] = None  # Path to custom-trained pothole model
     YOLO_ROAD_DAMAGE_MODEL: Optional[str] = None  # Path to custom-trained road damage model
     YOLO_PLATE_MODEL: Optional[str] = None  # Path to custom-trained license plate model
+    YOLO_CHILD_MODEL: Optional[str] = None  # Path to custom-trained school children model
+    YOLO_INFRASTRUCTURE_MODEL: Optional[str] = None  # Path to custom-trained infrastructure defect model
     DETECTION_CONFIDENCE_THRESHOLD: float = 0.35
     TRACKER_TYPE: str = "bytetrack.yaml"
 
@@ -43,8 +45,9 @@ class Settings(BaseSettings):
     # Road Health Score weights
     RH_WEIGHT_POTHOLE: float = 10.0
     RH_WEIGHT_ROAD_DAMAGE: float = 8.0
-    RH_WEIGHT_WATERLOGGING: float = 6.0
+    RH_WEIGHT_WATERLOGGING: float = 8.0
     RH_WEIGHT_MISSING_SIGNAGE: float = 7.0
+    RH_WEIGHT_DAMAGED_SIGNBOARD: float = 7.0
     RH_WEIGHT_DAMAGED_DIVIDER: float = 5.0
     RH_WEIGHT_MISSING_ZEBRA: float = 4.0
 

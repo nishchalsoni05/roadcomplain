@@ -33,6 +33,7 @@ CLASS_TO_EVENT_TYPE = {
     "road_damage": EventType.ROAD_DAMAGE,
     "waterlogging": EventType.WATERLOGGING,
     "missing_signage": EventType.MISSING_SIGNAGE,
+    "damaged_signboard": EventType.DAMAGED_SIGNBOARD,
     "damaged_divider": EventType.DAMAGED_DIVIDER,
     "missing_zebra": EventType.MISSING_ZEBRA,
     "license_plate": EventType.LICENSE_PLATE,
@@ -45,9 +46,16 @@ INTELLIGENCE_EVENT_MAP = {
     "traffic_bottleneck": EventType.TRAFFIC_BOTTLENECK,
 }
 
+# High priority real-world defects (need logging even with 1 frame)
+HIGH_PRIORITY_TYPES = {
+    "pothole", "road_damage", "waterlogging", "missing_signage", "damaged_signboard",
+    "damaged_divider", "missing_zebra", "rash_driving", "close_call",
+    "traffic_bottleneck", "pedestrian_risk"
+}
+
 # Event types that we want to persist individually
 PERSIST_TYPES = {
-    "pothole", "road_damage", "waterlogging", "missing_signage",
+    "pothole", "road_damage", "waterlogging", "missing_signage", "damaged_signboard",
     "damaged_divider", "missing_zebra", "license_plate"
 }
 
@@ -114,7 +122,8 @@ class EventFusionEngine:
         location: Optional[LocationReading],
         session_id: Optional[uuid.UUID],
         db: AsyncSession,
-        skip_debounce: bool = False
+        skip_debounce: bool = False,
+        persist_all: bool = False
     ) -> list[DetectionEvent]:
         """
         Fuse AI results with location data and persist to database.
@@ -129,7 +138,7 @@ class EventFusionEngine:
 
         # Persist significant individual detections (road defects, plates)
         for det in result.detections:
-            if det.class_name not in PERSIST_TYPES:
+            if not persist_all and det.class_name not in PERSIST_TYPES:
                 continue
 
             event_type = CLASS_TO_EVENT_TYPE.get(det.class_name)
@@ -277,6 +286,7 @@ class EventFusionEngine:
                 location_accuracy=location.accuracy_meters if location else None,
                 location_source=location.source_type if location else None,
                 address=address,
+                evidence_path=result.evidence_paths.get(f"license_plate_{result.frame_number}"),
                 event_metadata={
                     "plate_text": plate.plate_text,
                     "ocr_confidence": plate.confidence,

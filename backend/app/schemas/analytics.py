@@ -52,3 +52,25 @@ class AnalyticsTrends(BaseModel):
     trends: list[TrendDataPoint]
     distribution: list[DistributionItem]
     period: str = "30d"
+
+class HeatmapPoint(BaseModel):
+    lat: float
+    lng: float
+    intensity: float
+
+class ODMatrixRow(BaseModel):
+    plate_number: str
+    origin_lat: float
+    origin_lng: float
+    dest_lat: float
+    dest_lng: float
+    travel_time_minutes: float
+    start_time: datetime
+    end_time: datetime
+
+class RouteDelay(BaseModel):
+    route_id: str
+    center_lat: float
+    center_lng: float
+    avg_speed_px: float
+    estimated_delay_minutes: float

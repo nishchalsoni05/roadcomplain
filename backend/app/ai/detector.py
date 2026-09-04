@@ -49,6 +49,8 @@ class Detector:
         self._pothole_model = None
         self._road_damage_model = None
         self._plate_model = None
+        self._child_model = None
+        self._infrastructure_model = None
         self._models_loaded = False
         
         # Check for CUDA availability to support CPU fallback
@@ -99,6 +101,24 @@ class Detector:
                     logger.info("Plate detection model loaded")
                 except Exception as e:
                     logger.warning(f"Plate model not available: {e}")
+                    
+            # Load school children model if available
+            if settings.YOLO_CHILD_MODEL:
+                try:
+                    logger.info(f"Loading child model: {settings.YOLO_CHILD_MODEL}")
+                    self._child_model = YOLO(settings.YOLO_CHILD_MODEL)
+                    logger.info("Child detection model loaded")
+                except Exception as e:
+                    logger.warning(f"Child model not available: {e}")
+                    
+            # Load infrastructure model if available
+            if settings.YOLO_INFRASTRUCTURE_MODEL:
+                try:
+                    logger.info(f"Loading infrastructure model: {settings.YOLO_INFRASTRUCTURE_MODEL}")
+                    self._infrastructure_model = YOLO(settings.YOLO_INFRASTRUCTURE_MODEL)
+                    logger.info("Infrastructure detection model loaded")
+                except Exception as e:
+                    logger.warning(f"Infrastructure model not available: {e}")
 
             self._models_loaded = True
             logger.info("All available models loaded")
@@ -445,5 +465,15 @@ class Detector:
                 "loaded": self._plate_model is not None,
                 "path": settings.YOLO_PLATE_MODEL,
                 "description": "License plate detection model for ANPR"
+            },
+            "child_model": {
+                "loaded": self._child_model is not None,
+                "path": settings.YOLO_CHILD_MODEL,
+                "description": "Custom school children detection model"
+            },
+            "infrastructure_model": {
+                "loaded": self._infrastructure_model is not None,
+                "path": settings.YOLO_INFRASTRUCTURE_MODEL,
+                "description": "Custom infrastructure defect detection model"
             }
         }

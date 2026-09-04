@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 SEVERITY_WEIGHTS = {
     EventType.POTHOLE: settings.RH_WEIGHT_POTHOLE,          # 10 — most dangerous
     EventType.ROAD_DAMAGE: settings.RH_WEIGHT_ROAD_DAMAGE,  # 8
-    EventType.WATERLOGGING: settings.RH_WEIGHT_WATERLOGGING, # 6
+    EventType.WATERLOGGING: settings.RH_WEIGHT_WATERLOGGING,     # 8
     EventType.MISSING_SIGNAGE: settings.RH_WEIGHT_MISSING_SIGNAGE, # 7
+    EventType.DAMAGED_SIGNBOARD: settings.RH_WEIGHT_DAMAGED_SIGNBOARD, # 7
     EventType.DAMAGED_DIVIDER: settings.RH_WEIGHT_DAMAGED_DIVIDER, # 5
     EventType.MISSING_ZEBRA: settings.RH_WEIGHT_MISSING_ZEBRA,     # 4
 }
@@ -131,7 +132,7 @@ class RoadHealthService:
             pothole_count=counts.get(EventType.POTHOLE, 0),
             damage_count=counts.get(EventType.ROAD_DAMAGE, 0),
             waterlog_count=counts.get(EventType.WATERLOGGING, 0),
-            signage_issues=counts.get(EventType.MISSING_SIGNAGE, 0),
+            signage_issues=counts.get(EventType.MISSING_SIGNAGE, 0) + counts.get(EventType.DAMAGED_SIGNBOARD, 0),
             divider_issues=counts.get(EventType.DAMAGED_DIVIDER, 0),
             zebra_issues=counts.get(EventType.MISSING_ZEBRA, 0),
             computation_details={

@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Camera, Map, FileSearch,
-  History, BarChart3, Settings, Shield, Menu, X
+  History, BarChart3, Settings, Shield, Menu, X, Activity
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -12,6 +12,7 @@ const navItems = [
   { path: '/incidents', label: 'Incident Analysis', Icon: FileSearch },
   { path: '/history', label: 'Test History', Icon: History },
   { path: '/analytics', label: 'Analytics', Icon: BarChart3 },
+  { path: '/traffic-analytics', label: 'Traffic Analytics', Icon: Activity },
   { path: '/settings', label: 'Settings', Icon: Settings },
 ]
 

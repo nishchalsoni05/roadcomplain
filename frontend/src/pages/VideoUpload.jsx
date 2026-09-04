@@ -61,7 +61,7 @@ export default function VideoUpload() {
 
               Object.values(uniqueDets).forEach(d => {
                 // Only log significant defects as events, ignore standard vehicles for the log
-                if (['pothole', 'road_damage', 'waterlogging', 'missing_signage', 'damaged_divider'].includes(d.class_name)) {
+                if (['pothole', 'road_damage', 'waterlogging', 'missing_signage', 'damaged_signboard', 'damaged_divider'].includes(d.class_name)) {
                   // Restored threshold to 0.30 to filter out AI noise
                   if (d.confidence >= 0.30) {
                     newEvents.push({

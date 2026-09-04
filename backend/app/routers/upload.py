@@ -111,7 +111,10 @@ async def process_uploaded_video_ws(websocket: WebSocket, session_id: str):
                 import cv2
                 import time
                 from ..ai.video_source import FrameData
-                from ..ai.scene_analysis import detect_waterlogging, detect_vehicle_damage
+                from ..ai.scene_analysis import (
+                    detect_waterlogging, detect_vehicle_damage,
+                    detect_missing_zebra, detect_damaged_divider, detect_damaged_signboard
+                )
                 from ..ai.detector import Detection
                 from ..ai.intelligence import IntelligenceEvent
                 
@@ -165,6 +168,46 @@ async def process_uploaded_video_ws(websocket: WebSocket, session_id: str):
                         ))
                         logger.info(f"Scene analysis added: vehicle_damage ({sd.confidence})")
                 
+                # Missing Zebra Crossing fallback
+                traffic_light_dets = [d for d in detections if d.class_name == 'traffic_light']
+                if traffic_light_dets and 'missing_zebra' not in yolo_types:
+                    missing_zebras = detect_missing_zebra(frame, traffic_light_dets)
+                    for mz in missing_zebras:
+                        detections.append(Detection(
+                            class_id=901, class_name=mz.class_name,
+                            confidence=mz.confidence, bbox=mz.bbox, model_source="scene_analysis_cv"
+                        ))
+                        logger.info(f"Scene analysis added: {mz.class_name}")
+
+                # Damaged Divider fallback
+                if 'damaged_divider' not in yolo_types:
+                    damaged_dividers = detect_damaged_divider(frame)
+                    for dd in damaged_dividers:
+                        detections.append(Detection(
+                            class_id=902, class_name=dd.class_name,
+                            confidence=dd.confidence, bbox=dd.bbox, model_source="scene_analysis_cv"
+                        ))
+                        logger.info(f"Scene analysis added: {dd.class_name}")
+
+                # Damaged Signboard fallback
+                sign_dets = [d for d in detections if d.class_name in ('traffic_light', 'stop_sign', 'traffic_object')]
+                if sign_dets and 'damaged_signboard' not in yolo_types:
+                    damaged_signs = detect_damaged_signboard(frame, sign_dets)
+                    for ds in damaged_signs:
+                        detections.append(Detection(
+                            class_id=903, class_name=ds.class_name,
+                            confidence=ds.confidence, bbox=ds.bbox, model_source="scene_analysis_cv"
+                        ))
+                        logger.info(f"Scene analysis added: {ds.class_name}")
+                
+                # Run ANPR for image
+                plate_readings = []
+                if pipeline.anpr.is_available:
+                    plate_dets = [d for d in detections if d.class_name == "license_plate"]
+                    if plate_dets:
+                        plate_readings = pipeline.anpr.process_frame(frame, plate_dets)
+                        logger.info(f"ANPR read {len(plate_readings)} plates from image")
+
                 # Build result manually
                 from ..ai.pipeline import RawDetectionResult
                 result = RawDetectionResult(
@@ -172,6 +215,7 @@ async def process_uploaded_video_ws(websocket: WebSocket, session_id: str):
                     timestamp=frame_data.timestamp,
                     detections=detections,
                     intelligence_events=intel_events,
+                    plate_readings=plate_readings,
                     vehicle_count=len(vehicle_dets),
                     pedestrian_count=len([d for d in detections if d.class_name == 'pedestrian']),
                 )
@@ -179,8 +223,8 @@ async def process_uploaded_video_ws(websocket: WebSocket, session_id: str):
                 # Save evidence
                 evidence_paths = {}
                 for det in detections:
-                    if det.class_name in ("pothole", "road_damage", "waterlogging",
-                                          "missing_signage", "damaged_divider", "missing_zebra"):
+                    if is_image or det.class_name in ("pothole", "road_damage", "waterlogging",
+                                          "missing_signage", "damaged_signboard", "damaged_divider", "missing_zebra"):
                         evidence_path = pipeline._save_evidence(frame, det.class_name, frame_data.timestamp)
                         if evidence_path:
                             evidence_paths[f"{det.class_name}_1"] = evidence_path
@@ -193,11 +237,14 @@ async def process_uploaded_video_ws(websocket: WebSocket, session_id: str):
                 logger.info(f"Final result: {len(result.detections)} detections, {len(result.intelligence_events)} intel events")
                 
                 total_events = 0
-                if result.detections or result.intelligence_events:
+                if result.detections or result.intelligence_events or result.plate_readings:
                     await websocket.send_json(result.to_ws_message())
-                    events = await fusion.fuse_and_persist(result, None, session.id, db, skip_debounce=True)
+                    events = await fusion.fuse_and_persist(result, None, session.id, db, skip_debounce=True, persist_all=True)
+                    if events:
+                        event_types = list(set([e.event_type.value for e in events]))
+                        session.description = ", ".join(event_types).replace('_', ' ')
                     total_events += len(events)
-                    logger.info(f"Persisted {total_events} events to database")
+                    logger.info(f"Persisted {total_events} events to database from image upload")
                 
                 await websocket.send_json({
                     "type": "progress",

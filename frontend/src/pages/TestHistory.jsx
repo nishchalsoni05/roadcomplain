@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { History, Filter, MapPin, AlertTriangle, Navigation, Trash2, X, ExternalLink, Image as ImageIcon, Star, Info } from 'lucide-react'
-import { getEvents, deleteEvent, deleteAllSessions, toggleFavorite, downloadEventReport } from '../services/api'
+import { getEvents, deleteEvent, deleteAllSessions, toggleFavorite, downloadEventReport, getSessions, downloadSessionReport } from '../services/api'
 import { formatTimestamp } from '../utils/formatters'
 import { EVENT_TYPE_LABELS, EVENT_TYPE_COLORS, SEVERITY_COLORS } from '../utils/constants'
 
@@ -113,6 +113,15 @@ function EventDetailsModal({ event, onClose }) {
             </div>
           </div>
           
+          {event.metadata?.plate_text && (
+            <div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>Analyzed License Plate</div>
+              <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '1.2rem', background: 'var(--bg-secondary)', padding: '6px 12px', borderRadius: '6px', display: 'inline-block', letterSpacing: '2px', border: '1px solid var(--border)' }}>
+                {event.metadata.plate_text}
+              </div>
+            </div>
+          )}
+
           <div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>Full Address</div>
             <div style={{ fontWeight: 500 }}>{event.address || "Address unresolved"}</div>
@@ -145,9 +154,17 @@ export default function TestHistory() {
   const [selectedImage, setSelectedImage] = useState(null)
   const [selectedEventDetails, setSelectedEventDetails] = useState(null)
 
+  const [sessions, setSessions] = useState([])
+  const [sessionsTotal, setSessionsTotal] = useState(0)
+  const [activeTab, setActiveTab] = useState('incidents')
+
   useEffect(() => {
-    fetchEvents()
-  }, [filter, page])
+    if (activeTab === 'incidents') {
+      fetchEvents()
+    } else {
+      fetchSessions()
+    }
+  }, [filter, page, activeTab])
 
   const fetchEvents = async () => {
     try {
@@ -163,6 +180,19 @@ export default function TestHistory() {
       setTotal(res.data.total || 0)
     } catch (e) {
       console.error('Failed to fetch events:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchSessions = async () => {
+    try {
+      setLoading(true)
+      const res = await getSessions({ page, page_size: 20 })
+      setSessions(res.data.sessions || [])
+      setSessionsTotal(res.data.total || 0)
+    } catch (e) {
+      console.error('Failed to fetch sessions:', e)
     } finally {
       setLoading(false)
     }
@@ -213,9 +243,25 @@ export default function TestHistory() {
     <div className="page-container" style={{ maxWidth: '100%', padding: '0 40px' }}>
       <div className="page-header">
         <h1>Test History Log</h1>
-        <p>A detailed tabular view of every individual incident recorded by the AI.</p>
+        <p>A detailed tabular view of every individual incident and analysis session recorded by the AI.</p>
       </div>
 
+      <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--border)', marginBottom: 24 }}>
+        <button 
+          onClick={() => { setActiveTab('incidents'); setPage(1); }} 
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '12px 0', borderBottom: activeTab === 'incidents' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'incidents' ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 600, fontSize: '1rem' }}
+        >
+          Incidents
+        </button>
+        <button 
+          onClick={() => { setActiveTab('sessions'); setPage(1); }} 
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '12px 0', borderBottom: activeTab === 'sessions' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'sessions' ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 600, fontSize: '1rem' }}
+        >
+          Analysis Sessions
+        </button>
+      </div>
+
+      {activeTab === 'incidents' && (
       <div className="card" style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 20px' }}>
         <Filter size={16} color="var(--text-muted)" />
         <select
@@ -242,13 +288,14 @@ export default function TestHistory() {
            <Trash2 size={14} style={{ marginRight: 6 }} /> Delete All
         </button>
       </div>
+      )}
 
       {loading ? (
         <div className="loading-container">
           <div className="spinner" />
           <span style={{ color: 'var(--text-muted)' }}>Loading events...</span>
         </div>
-      ) : events.length === 0 ? (
+      ) : activeTab === 'incidents' && events.length === 0 ? (
         <div className="card">
           <div className="empty-state">
             <History size={48} />
@@ -256,7 +303,15 @@ export default function TestHistory() {
             <p>Run a live detection session to start logging incidents.</p>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'sessions' && sessions.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <History size={48} />
+            <h3>No Analysis Sessions</h3>
+            <p>Upload an image/video or start a live camera feed to create a session.</p>
+          </div>
+        </div>
+      ) : activeTab === 'incidents' ? (
         <>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
@@ -397,6 +452,152 @@ export default function TestHistory() {
                 className="btn btn-outline btn-sm"
                 onClick={() => setPage(p => p + 1)}
                 disabled={page * 20 >= total}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.95rem' }}>
+                <thead style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)', width: 120 }}>Evidence</th>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>Incident Type</th>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>AI Score</th>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>Damage Severity</th>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)', minWidth: 250 }}>Geolocation & Address</th>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>Date & Time</th>
+                    <th style={{ padding: '16px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map((session) => {
+                    const color = session.status === 'completed' ? '#22C55E' : session.status === 'error' ? '#EF4444' : '#3B82F6'
+                    const label = session.source_type.replace(/_/g, ' ')
+                    const score = session.status === 'completed' ? 100 : session.status === 'error' ? 0 : 50
+                    
+                    let evidenceUrl = null
+                    if (session.source_info?.saved_path) {
+                      const filename = session.source_info.saved_path.split(/[/\\]/).pop()
+                      if (session.source_info.saved_path.includes('uploads')) {
+                        evidenceUrl = `http://localhost:8000/api/evidence/uploads/${filename}`
+                      }
+                    }
+
+                    return (
+                    <tr key={session.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '12px 16px' }}>
+                        {evidenceUrl ? (
+                          <div 
+                            style={{ width: 100, height: 60, borderRadius: 6, background: '#000', overflow: 'hidden', cursor: 'pointer', border: `1px solid ${color}40` }}
+                            onClick={() => setSelectedImage({ src: evidenceUrl, label: session.name || label })}
+                          >
+                            <img src={evidenceUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Evidence" />
+                          </div>
+                        ) : (
+                          <div style={{ width: 100, height: 60, borderRadius: 6, background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                            <ImageIcon size={20} />
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px', textTransform: 'capitalize', fontWeight: '500' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color, padding: '4px 10px', background: `${color}15`, borderRadius: 100, fontSize: '0.85rem' }}>
+                          <AlertTriangle size={14} />
+                          {session.description || label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{score}%</span>
+                          <div style={{ width: 60, height: 6, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${score}%`, height: '100%', background: color }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textTransform: 'capitalize' }}>
+                        <span style={{ color: color, fontWeight: 600 }}>
+                          {session.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ color: 'var(--text-primary)', fontSize: '0.9rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {session.name || "Analysis Session"}
+                          </span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                            {session.total_detections} Detections Found
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                        {formatTimestamp(session.started_at)}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <button 
+                            className="btn btn-outline btn-sm"
+                            style={{ padding: '4px 8px', color: 'var(--text-primary)', borderColor: 'transparent' }}
+                            onClick={async () => {
+                              try {
+                                const response = await downloadSessionReport(session.id)
+                                const url = window.URL.createObjectURL(new Blob([response.data]))
+                                const link = document.createElement('a')
+                                link.href = url
+                                link.setAttribute('download', `session_report_${session.id}.pdf`)
+                                document.body.appendChild(link)
+                                link.click()
+                                link.remove()
+                              } catch (e) {
+                                console.error('Download error:', e)
+                                alert('Failed to download session report')
+                              }
+                            }}
+                            title="Download Report"
+                          >
+                            <ExternalLink size={14} />
+                          </button>
+                          <button 
+                            className="btn btn-outline btn-sm"
+                            style={{ padding: '4px 8px', color: '#DC2626', borderColor: 'transparent' }}
+                            onClick={() => {
+                              if (window.confirm('Are you sure you want to delete this session?')) {
+                                // Implement session delete later if needed. For now just mock it.
+                                alert('Delete session functionality not yet implemented in API wrapper.')
+                              }
+                            }}
+                            title="Delete Session"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )})}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {sessionsTotal > 20 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 24 }}>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+              >
+                Previous
+              </button>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                Page {page} of {Math.ceil(sessionsTotal / 20)}
+              </span>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={() => setPage(p => p + 1)}
+                disabled={page * 20 >= sessionsTotal}
               >
                 Next
               </button>

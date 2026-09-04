@@ -19,6 +19,7 @@ class EventType(str, enum.Enum):
     RASH_DRIVING = "rash_driving"
     CLOSE_CALL = "close_call"
     MISSING_SIGNAGE = "missing_signage"
+    DAMAGED_SIGNBOARD = "damaged_signboard"
     DAMAGED_DIVIDER = "damaged_divider"
     MISSING_ZEBRA = "missing_zebra"
     LICENSE_PLATE = "license_plate"

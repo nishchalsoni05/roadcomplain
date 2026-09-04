@@ -17,7 +17,10 @@ from .detector import Detector, Detection
 from .tracker import ObjectTracker
 from .anpr import ANPRPipeline
 from .intelligence import IntelligenceLayer, IntelligenceEvent
-from .scene_analysis import detect_waterlogging, detect_vehicle_damage
+from .scene_analysis import (
+    detect_waterlogging, detect_vehicle_damage,
+    detect_missing_zebra, detect_damaged_divider, detect_damaged_signboard
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +174,42 @@ class AIPipeline:
                 ))
                 logger.info(f"Scene analysis added: vehicle_damage ({sd.confidence:.2f})")
 
+        # Missing Zebra Crossing fallback
+        traffic_light_dets = [d for d in detections if d.class_name == 'traffic_light']
+        if traffic_light_dets and 'missing_zebra' not in yolo_types:
+            missing_zebras = await loop.run_in_executor(
+                None, detect_missing_zebra, frame, traffic_light_dets
+            )
+            for mz in missing_zebras:
+                detections.append(Detection(
+                    class_id=901, class_name=mz.class_name,
+                    confidence=mz.confidence, bbox=mz.bbox, model_source="scene_analysis_cv"
+                ))
+
+        # Damaged Divider fallback
+        if 'damaged_divider' not in yolo_types:
+            damaged_dividers = await loop.run_in_executor(
+                None, detect_damaged_divider, frame
+            )
+            for dd in damaged_dividers:
+                detections.append(Detection(
+                    class_id=902, class_name=dd.class_name,
+                    confidence=dd.confidence, bbox=dd.bbox, model_source="scene_analysis_cv"
+                ))
+
+        # Damaged Signboard fallback
+        sign_dets = [d for d in detections if d.class_name in ('traffic_light', 'stop_sign', 'traffic_object')]
+        if sign_dets and 'damaged_signboard' not in yolo_types:
+            damaged_signs = await loop.run_in_executor(
+                None, detect_damaged_signboard, frame, sign_dets
+            )
+            for ds in damaged_signs:
+                detections.append(Detection(
+                    class_id=903, class_name=ds.class_name,
+                    confidence=ds.confidence, bbox=ds.bbox, model_source="scene_analysis_cv"
+                ))
+
+
         # Step 7: Save evidence crops for significant detections
         evidence_paths = {}
         for event in intel_events:
@@ -182,8 +221,8 @@ class AIPipeline:
 
         # Save evidence for road defect detections
         for det in detections:
-            if det.class_name in ("pothole", "road_damage", "waterlogging",
-                                  "missing_signage", "damaged_divider", "missing_zebra"):
+            if det.class_name in ("pothole", "road_damage", "waterlogging", 
+                                  "missing_signage", "damaged_signboard", "damaged_divider", "missing_zebra"):
                 evidence_path = await loop.run_in_executor(
                     None, self._save_evidence_crop, frame, det
                 )

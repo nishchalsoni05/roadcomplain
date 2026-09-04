@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import { Filter, RefreshCw } from 'lucide-react'
 import L from 'leaflet'
-import { getEvents } from '../services/api'
+import { getEvents, getHeatmap } from '../services/api'
 import { EVENT_TYPE_COLORS, EVENT_TYPE_LABELS } from '../utils/constants'
 import { formatConfidence, formatTimestamp, formatAccuracy } from '../utils/formatters'
+import HeatmapLayer from '../components/HeatmapLayer'
 
 const createMarkerIcon = (color) => {
   return L.divIcon({
@@ -31,8 +32,10 @@ function MapUpdater({ center }) {
 
 export default function GISCommand() {
   const [events, setEvents] = useState([])
+  const [heatmapData, setHeatmapData] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
+  const [viewMode, setViewMode] = useState('markers') // 'markers' or 'heatmap'
   const [mapCenter, setMapCenter] = useState([20.5937, 78.9629])
 
   useEffect(() => {
@@ -47,6 +50,10 @@ export default function GISCommand() {
       const res = await getEvents(params)
       const evts = res.data.events || []
       setEvents(evts)
+      
+      const heatRes = await getHeatmap()
+      setHeatmapData(heatRes.data.map(p => [p.lat, p.lng, p.intensity]))
+      
       const withCoords = evts.find(e => e.latitude && e.longitude)
       if (withCoords) setMapCenter([withCoords.latitude, withCoords.longitude])
     } catch (e) {
@@ -78,9 +85,23 @@ export default function GISCommand() {
             <option key={key} value={key}>{label}</option>
           ))}
         </select>
-        <button className="btn btn-outline" onClick={fetchEvents} style={{ marginLeft: 'auto' }}>
-          <RefreshCw size={14} /> REFRESH
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button 
+            className={`btn ${viewMode === 'markers' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setViewMode('markers')}
+          >
+            Markers
+          </button>
+          <button 
+            className={`btn ${viewMode === 'heatmap' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setViewMode('heatmap')}
+          >
+            Heatmap
+          </button>
+          <button className="btn btn-outline" onClick={fetchEvents}>
+            <RefreshCw size={14} /> REFRESH
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 0, overflow: 'hidden', height: 'calc(100vh - 240px)', minHeight: 500 }}>
@@ -90,7 +111,8 @@ export default function GISCommand() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <MapUpdater center={mapCenter} />
-          {eventsWithCoords.map(event => {
+          
+          {viewMode === 'markers' && eventsWithCoords.map(event => {
             const color = EVENT_TYPE_COLORS[event.event_type] || '#00F0FF'
             return (
               <Marker key={event.id} position={[event.latitude, event.longitude]} icon={createMarkerIcon(color)}>
@@ -103,6 +125,10 @@ export default function GISCommand() {
               </Marker>
             )
           })}
+          
+          {viewMode === 'heatmap' && heatmapData.length > 0 && (
+            <HeatmapLayer points={heatmapData} />
+          )}
         </MapContainer>
       </div>
     </div>

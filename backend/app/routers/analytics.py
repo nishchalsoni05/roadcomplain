@@ -12,7 +12,11 @@ from sqlalchemy import select, func, and_, extract
 from ..database import get_db
 from ..models.event import DetectionEvent, EventType
 from ..models.session import DetectionSession, SessionStatus
-from ..schemas.analytics import SummaryStats, RoadHealthResponse, TrendDataPoint, DistributionItem, AnalyticsTrends
+from ..schemas.analytics import (
+    SummaryStats, RoadHealthResponse, TrendDataPoint, 
+    DistributionItem, AnalyticsTrends, HeatmapPoint, 
+    ODMatrixRow, RouteDelay
+)
 from ..services.road_health import RoadHealthService
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -228,3 +232,153 @@ async def get_dataset_samples():
             
     return samples
 
+@router.get("/heatmap", response_model=list[HeatmapPoint])
+async def get_heatmap(db: AsyncSession = Depends(get_db)):
+    """
+    Returns heatmap data points based on event severity and density.
+    """
+    # Fetch events with coordinates
+    query = select(DetectionEvent.latitude, DetectionEvent.longitude, DetectionEvent.event_type, DetectionEvent.severity).where(
+        and_(DetectionEvent.latitude.isnot(None), DetectionEvent.longitude.isnot(None))
+    ).limit(5000)
+    
+    result = await db.execute(query)
+    events = result.all()
+    
+    heatmap = []
+    for ev in events:
+        intensity = 0.5
+        if ev.event_type in (EventType.TRAFFIC_BOTTLENECK, EventType.CLOSE_CALL, EventType.RASH_DRIVING):
+            intensity = 1.0
+        elif ev.event_type in (EventType.POTHOLE, EventType.ROAD_DAMAGE):
+            intensity = 0.8
+            
+        heatmap.append(HeatmapPoint(lat=ev.latitude, lng=ev.longitude, intensity=intensity))
+        
+    return heatmap
+
+@router.get("/origin-destination", response_model=list[ODMatrixRow])
+async def get_origin_destination(db: AsyncSession = Depends(get_db)):
+    """
+    Computes Origin-Destination matrices by matching license plates across different locations and times.
+    """
+    query = select(
+        DetectionEvent.event_metadata, 
+        DetectionEvent.latitude, 
+        DetectionEvent.longitude, 
+        DetectionEvent.detected_at
+    ).where(
+        and_(
+            DetectionEvent.event_type == EventType.LICENSE_PLATE,
+            DetectionEvent.latitude.isnot(None)
+        )
+    ).order_by(DetectionEvent.detected_at)
+    
+    result = await db.execute(query)
+    plate_events = result.all()
+    
+    # Group by plate
+    plates = {}
+    for ev in plate_events:
+        metadata = ev.event_metadata or {}
+        plate_text = metadata.get("plate_text")
+        if not plate_text:
+            continue
+            
+        if plate_text not in plates:
+            plates[plate_text] = []
+        plates[plate_text].append(ev)
+        
+    od_rows = []
+    for plate, events in plates.items():
+        if len(events) < 2:
+            continue
+            
+        # Simplistic OD logic: First seen is origin, Last seen is destination
+        # Real-world logic would chunk by trips based on time gaps.
+        origin = events[0]
+        dest = events[-1]
+        
+        # Calculate distance proxy to ensure they actually moved
+        lat_diff = abs(dest.latitude - origin.latitude)
+        lng_diff = abs(dest.longitude - origin.longitude)
+        if lat_diff < 0.005 and lng_diff < 0.005:
+            continue # Didn't move far enough
+            
+        travel_time = (dest.detected_at - origin.detected_at).total_seconds() / 60.0
+        if travel_time <= 0:
+            continue
+            
+        od_rows.append(ODMatrixRow(
+            plate_number=plate,
+            origin_lat=origin.latitude,
+            origin_lng=origin.longitude,
+            dest_lat=dest.latitude,
+            dest_lng=dest.longitude,
+            travel_time_minutes=round(travel_time, 2),
+            start_time=origin.detected_at,
+            end_time=dest.detected_at
+        ))
+        
+    # Sort by longest travel time
+    od_rows.sort(key=lambda x: x.travel_time_minutes, reverse=True)
+    return od_rows[:100]
+
+@router.get("/route-delays", response_model=list[RouteDelay])
+async def get_route_delays(db: AsyncSession = Depends(get_db)):
+    """
+    Computes estimated route delays based on traffic bottleneck events.
+    """
+    now = datetime.now(timezone.utc)
+    # Check last 6 hours
+    start_time = now - timedelta(hours=6)
+    
+    query = select(
+        DetectionEvent.latitude,
+        DetectionEvent.longitude,
+        DetectionEvent.event_metadata
+    ).where(
+        and_(
+            DetectionEvent.event_type == EventType.TRAFFIC_BOTTLENECK,
+            DetectionEvent.latitude.isnot(None),
+            DetectionEvent.detected_at >= start_time
+        )
+    )
+    
+    result = await db.execute(query)
+    bottlenecks = result.all()
+    
+    # Very simplified clustering: group by rounded lat/lng
+    clusters = {}
+    for b in bottlenecks:
+        route_id = f"R-{round(b.latitude, 3)}-{round(b.longitude, 3)}"
+        if route_id not in clusters:
+            clusters[route_id] = {"lat": 0, "lng": 0, "speeds": [], "count": 0}
+            
+        clusters[route_id]["lat"] += b.latitude
+        clusters[route_id]["lng"] += b.longitude
+        clusters[route_id]["count"] += 1
+        
+        meta = b.event_metadata or {}
+        speed = meta.get("avg_speed", 10.0) # default low speed
+        clusters[route_id]["speeds"].append(speed)
+        
+    delays = []
+    for r_id, data in clusters.items():
+        if data["count"] < 2:
+            continue # Need at least 2 events to call it a persistent delay
+            
+        avg_speed = sum(data["speeds"]) / len(data["speeds"])
+        # Assuming baseline free flow speed is 200 px/s, we convert the ratio to a rough delay
+        delay_factor = max(0, 200 - avg_speed) / 50.0 # Arbitrary translation to minutes for demo
+        
+        delays.append(RouteDelay(
+            route_id=r_id,
+            center_lat=data["lat"] / data["count"],
+            center_lng=data["lng"] / data["count"],
+            avg_speed_px=round(avg_speed, 1),
+            estimated_delay_minutes=round(delay_factor, 1)
+        ))
+        
+    delays.sort(key=lambda x: x.estimated_delay_minutes, reverse=True)
+    return delays
