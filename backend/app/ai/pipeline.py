@@ -127,7 +127,8 @@ class AIPipeline:
         tracked_objects = self.tracker.update(detections, frame_data.timestamp)
 
         # Step 4: Run intelligence analysis on tracked state and raw detections
-        intel_events = self.intelligence.analyze(self.tracker, detections, frame_data.timestamp)
+        frame_h, frame_w = frame.shape[:2]
+        intel_events = self.intelligence.analyze(self.tracker, detections, frame_data.timestamp, frame_w, frame_h)
 
         # Step 5: Run ANPR if hit-and-run or on-demand
         plate_readings = []

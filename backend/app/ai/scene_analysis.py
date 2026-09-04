@@ -210,27 +210,24 @@ def detect_damaged_divider(frame: np.ndarray) -> list[SceneDetection]:
     try:
         h, w = frame.shape[:2]
         y_offset = int(h * 0.4)
-        roi = frame[y_offset:, int(w * 0.25):int(w * 0.75)] # center column
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        # Center column (where divider is)
+        roi_center = frame[y_offset:, int(w * 0.35):int(w * 0.65)]
+        # Left and Right sides (where the road lanes are)
+        roi_left = frame[y_offset:, int(w * 0.10):int(w * 0.30)]
+        roi_right = frame[y_offset:, int(w * 0.70):int(w * 0.90)]
         
-        edges = cv2.Canny(gray, 50, 150)
-        # Check density of edges in the expected divider region
-        density = cv2.countNonZero(edges) / (roi.shape[0] * roi.shape[1])
+        var_center = cv2.Laplacian(cv2.cvtColor(roi_center, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+        var_left = cv2.Laplacian(cv2.cvtColor(roi_left, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+        var_right = cv2.Laplacian(cv2.cvtColor(roi_right, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
         
-        # If density is extremely low, there might be no divider, but it could just be a flat road.
-        # We flag it if we expect a divided highway. For now, we'll use a heuristic:
-        # High texture variance in the center but lacking straight lines suggests a broken divider.
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, minLineLength=40, maxLineGap=20)
-        
-        texture_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        
-        if lines is None and texture_var > 300 and density > 0.05:
-            # Irregular texture but no straight lines -> possibly broken median
-            bbox = (float(w*0.25), float(y_offset), float(w*0.75), float(h))
+        # A broken divider is rough/textured, but the surrounding road should be relatively smooth.
+        # If the entire lower half is rough (e.g. grass, trees), it's not a road divider.
+        if var_center > 150 and var_center > var_left * 1.2 and var_center > var_right * 1.2:
+            bbox = (float(w*0.35), float(y_offset), float(w*0.65), float(h))
             detections.append(SceneDetection(
                 class_name="damaged_divider",
-                confidence=0.65,
-                description=f"Damaged/Broken road divider detected (var={texture_var:.0f})",
+                confidence=0.75,
+                description=f"Damaged/Broken road divider detected (var={var_center:.0f})",
                 bbox=bbox
             ))
             logger.info("Scene analysis: damaged_divider detected")
@@ -241,26 +238,40 @@ def detect_damaged_divider(frame: np.ndarray) -> list[SceneDetection]:
     return detections
 
 
-def detect_damaged_signboard(frame: np.ndarray, sign_detections: list) -> list[SceneDetection]:
+def detect_damaged_signboard(frame: np.ndarray, sign_detections: list = None) -> list[SceneDetection]:
     """
     Check detected traffic signs for severe deformation or defacing.
+    If no YOLO detections exist, scan the upper half of the image for large, high-texture polygonal objects.
     """
     detections = []
     try:
         h, w = frame.shape[:2]
-        for det in sign_detections:
-            if det.class_name not in ('traffic_light', 'stop_sign', 'traffic_object'):
-                continue
-                
-            x1, y1, x2, y2 = [int(c) for c in det.bbox]
-            x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
-            crop = frame[y1:y2, x1:x2]
-            
+        
+        crops_to_check = []
+        if sign_detections:
+            for det in sign_detections:
+                if det.class_name not in ('traffic_light', 'stop_sign', 'traffic_object'):
+                    continue
+                x1, y1, x2, y2 = [int(c) for c in det.bbox]
+                x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+                crops_to_check.append((frame[y1:y2, x1:x2], det.bbox))
+        else:
+            # Fallback: YOLO missed the sign entirely. Check the upper half of the image (typical sign location)
+            y_offset = int(h * 0.5)
+            roi = frame[:y_offset, :]
+            # Simple color thresholding for red/yellow/blue/green signs is too complex here,
+            # so we just analyze the texture variance of the upper region. 
+            # If it has some structure (sign), it will increase variance.
+            texture_var = cv2.Laplacian(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+            if texture_var > 150:
+                bbox = (0.0, 0.0, float(w), float(y_offset))
+                crops_to_check.append((roi, bbox))
+
+        for crop, bbox in crops_to_check:
             if crop.size == 0 or crop.shape[0] < 20 or crop.shape[1] < 20:
                 continue
                 
             gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-            # Find contours inside the sign bounding box. If it's highly irregular, it's damaged.
             _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
@@ -280,7 +291,7 @@ def detect_damaged_signboard(frame: np.ndarray, sign_detections: list) -> list[S
                     if fill_ratio < 0.8: # Highly irregular shape (bent sign)
                         is_damaged = True
                 
-                if texture_var > 1000: # Crumpled / faded / graffitied
+                if texture_var > 300: # Crumpled / faded / graffitied
                     is_damaged = True
                         
                 if is_damaged:
@@ -288,7 +299,7 @@ def detect_damaged_signboard(frame: np.ndarray, sign_detections: list) -> list[S
                         class_name="damaged_signboard",
                         confidence=0.85,
                         description=f"Damaged/Deformed traffic sign (var={texture_var:.0f})",
-                        bbox=det.bbox
+                        bbox=bbox
                     ))
                     logger.info("Scene analysis: damaged signboard detected")
                         

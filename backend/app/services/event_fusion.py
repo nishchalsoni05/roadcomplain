@@ -138,6 +138,10 @@ class EventFusionEngine:
 
         # Persist significant individual detections (road defects, plates)
         for det in result.detections:
+            # The user explicitly requested vehicles and pedestrians should NOT be logged as incidents
+            if det.class_name in ("car", "motorcycle", "bus", "truck", "pedestrian"):
+                continue
+
             if not persist_all and det.class_name not in PERSIST_TYPES:
                 continue
 

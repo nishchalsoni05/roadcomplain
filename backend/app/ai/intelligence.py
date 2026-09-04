@@ -50,7 +50,7 @@ class IntelligenceLayer:
         self._event_cooldown: dict[str, float] = {}  # Prevent spamming same events
         self._vehicle_count_history: list[tuple[float, int]] = []  # (timestamp, count)
 
-    def analyze(self, tracker: ObjectTracker, detections: list[Detection], timestamp: float) -> list[IntelligenceEvent]:
+    def analyze(self, tracker: ObjectTracker, detections: list[Detection], timestamp: float, frame_w: int = 1920, frame_h: int = 1080) -> list[IntelligenceEvent]:
         """
         Run all intelligence analyses on current tracked state.
         Returns newly detected events (respecting cooldowns).
@@ -59,7 +59,7 @@ class IntelligenceLayer:
 
         events.extend(self._detect_rash_driving(tracker, timestamp))
         events.extend(self._detect_pedestrian_risk(tracker, timestamp))
-        events.extend(self._detect_traffic_bottleneck(tracker, timestamp))
+        events.extend(self._detect_traffic_bottleneck(tracker, timestamp, frame_w, frame_h))
         events.extend(self._detect_close_call(tracker, timestamp))
         events.extend(self._detect_static_crash(detections, timestamp))
         events.extend(self._detect_waterlogged_potholes(detections, timestamp))
@@ -213,8 +213,8 @@ class IntelligenceLayer:
 
         return events
 
-    def _detect_traffic_bottleneck(self, tracker: ObjectTracker, timestamp: float) -> list[IntelligenceEvent]:
-        """Detect traffic bottleneck from vehicle count and average speed over time."""
+    def _detect_traffic_bottleneck(self, tracker: ObjectTracker, timestamp: float, frame_w: int, frame_h: int) -> list[IntelligenceEvent]:
+        """Detect traffic bottleneck from vehicle count and average speed over time, or high frame coverage."""
         events = []
         vehicles = tracker.get_vehicles()
         count = len(vehicles)
@@ -231,28 +231,46 @@ class IntelligenceLayer:
             if timestamp - self._event_cooldown[cooldown_key] < 30.0:
                 return events
 
+        # Coverage heuristic
+        frame_area = frame_w * frame_h
+        total_area = sum((v.trajectory[-1].bbox[2] - v.trajectory[-1].bbox[0]) * (v.trajectory[-1].bbox[3] - v.trajectory[-1].bbox[1]) for v in vehicles.values() if v.trajectory)
+        coverage = min(total_area / max(frame_area, 1), 1.0)
+
+        is_bottleneck = False
+        avg_speed = 0.0
+        ml_confidence = 0.0
+        reason = ""
+
+        # Condition 1: Lots of cars + low speed (tracked video)
         if count >= self.BOTTLENECK_VEHICLE_COUNT:
             speeds = [obj.pixel_speed for obj in vehicles.values()]
             avg_speed = sum(speeds) / len(speeds) if speeds else 0.0
-
             if avg_speed < self.BOTTLENECK_LOW_SPEED:
-                avg_count = sum(c for _, c in self._vehicle_count_history) / max(len(self._vehicle_count_history), 1)
-                
-                # Pure ML confidence average of all involved vehicles
-                ml_confidence = sum(obj.confidence for obj in vehicles.values()) / len(vehicles)
-                
-                events.append(IntelligenceEvent(
-                    event_type="traffic_bottleneck",
-                    confidence=ml_confidence,
-                    description=f"Traffic bottleneck: {count} vehicles, avg speed {avg_speed:.0f}px/s",
-                    involved_track_ids=list(vehicles.keys()),
-                    metadata={
-                        "vehicle_count": count,
-                        "avg_speed": avg_speed,
-                        "avg_count_60s": avg_count,
-                    }
-                ))
-                self._event_cooldown[cooldown_key] = timestamp
+                is_bottleneck = True
+                ml_confidence = sum(obj.confidence for obj in vehicles.values()) / max(len(vehicles), 1)
+                reason = f"Traffic bottleneck: {count} vehicles, avg speed {avg_speed:.0f}px/s"
+
+        # Condition 2: > 15% coverage OR > 4 vehicles
+        if not is_bottleneck and (coverage >= 0.15 or count >= 4):
+            is_bottleneck = True
+            ml_confidence = min(0.7 + (coverage * 0.3), 0.99)
+            reason = f"Traffic bottleneck: {count} vehicles, {coverage*100:.1f}% coverage"
+
+        if is_bottleneck:
+            avg_count = sum(c for _, c in self._vehicle_count_history) / max(len(self._vehicle_count_history), 1)
+            events.append(IntelligenceEvent(
+                event_type="traffic_bottleneck",
+                confidence=ml_confidence,
+                description=reason,
+                involved_track_ids=list(vehicles.keys()),
+                metadata={
+                    "vehicle_count": count,
+                    "avg_speed": avg_speed,
+                    "avg_count_60s": avg_count,
+                    "coverage": coverage
+                }
+            ))
+            self._event_cooldown[cooldown_key] = timestamp
 
         return events
 
