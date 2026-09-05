@@ -1,5 +1,6 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import Sidebar from './components/Layout/Sidebar'
+import LandingPage from './pages/LandingPage'
 import Home from './pages/Home'
 import LiveDetection from './pages/LiveDetection'
 import GISCommand from './pages/GISCommand'
@@ -10,14 +11,35 @@ import TrafficAnalytics from './pages/TrafficAnalytics'
 import SettingsPage from './pages/Settings'
 import VideoUpload from './pages/VideoUpload'
 import TrainedData from './pages/TrainedData'
+import Signup from './pages/Signup'
+import GigwGuidelines from './pages/GigwGuidelines'
+import Login from './pages/Login'
+import HowItWorks from './pages/HowItWorks'
+import AboutMinistry from './pages/AboutMinistry'
 
 export default function App() {
+  const location = useLocation()
+  const isPublicRoute = ['/', '/signup', '/gigw-guidelines', '/login', '/how-it-works', '/about-ministry'].includes(location.pathname)
+
+  if (isPublicRoute) {
+    return (
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/gigw-guidelines" element={<GigwGuidelines />} />
+        <Route path="/how-it-works" element={<HowItWorks />} />
+        <Route path="/about-ministry" element={<AboutMinistry />} />
+      </Routes>
+    )
+  }
+
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/dashboard" element={<Home />} />
           <Route path="/detect" element={<LiveDetection />} />
           <Route path="/upload" element={<VideoUpload />} />
           <Route path="/map" element={<GISCommand />} />

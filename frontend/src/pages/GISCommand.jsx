@@ -51,8 +51,18 @@ export default function GISCommand() {
       const evts = res.data.events || []
       setEvents(evts)
       
-      const heatRes = await getHeatmap()
-      setHeatmapData(heatRes.data.map(p => [p.lat, p.lng, p.intensity]))
+      // Generate heatmap data directly from actual fetched incidents to ensure perfect mapping
+      const heatData = evts
+        .filter(e => e.latitude && e.longitude)
+        .map(e => {
+          let intensity = 0.5
+          if (e.severity === 'critical') intensity = 1.0
+          if (e.severity === 'high') intensity = 0.8
+          if (e.severity === 'medium') intensity = 0.5
+          if (e.severity === 'low') intensity = 0.3
+          return [e.latitude, e.longitude, intensity]
+        })
+      setHeatmapData(heatData)
       
       const withCoords = evts.find(e => e.latitude && e.longitude)
       if (withCoords) setMapCenter([withCoords.latitude, withCoords.longitude])

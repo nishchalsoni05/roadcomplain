@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Camera, Map, FileSearch,
   History, BarChart3, Settings, Shield, Menu, X, Activity
@@ -6,7 +6,7 @@ import {
 import { useState } from 'react'
 
 const navItems = [
-  { path: '/', label: 'Overview', Icon: LayoutDashboard },
+  { path: '/dashboard', label: 'Overview', Icon: LayoutDashboard },
   { path: '/detect', label: 'Live Detection', Icon: Camera },
   { path: '/map', label: 'GIS Command Map', Icon: Map },
   { path: '/incidents', label: 'Incident Analysis', Icon: FileSearch },
@@ -31,12 +31,12 @@ export default function Sidebar() {
       </button>
 
       <aside className={`sidebar ${collapsed ? 'sidebar-open' : ''}`}>
-        <div className="sidebar-brand">
+        <Link to="/" className="sidebar-brand" style={{ textDecoration: 'none' }}>
           <div className="sidebar-brand-icon">
             <Shield size={24} />
           </div>
-          {!collapsed && <div className="sidebar-brand-text" style={{marginLeft: 12}}>RoadRepair</div>}
-        </div>
+          {!collapsed && <div className="sidebar-brand-text" style={{marginLeft: 12}}>MargDarshan AI</div>}
+        </Link>
 
         <div className="sidebar-nav">
           {navItems.map(({ path, label, Icon }) => (

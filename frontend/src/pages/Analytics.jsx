@@ -98,7 +98,7 @@ export default function Analytics() {
               fontFamily: 'monospace', textAlign: 'left', maxWidth: 600, margin: '16px auto 0'
             }}>
               <strong>Formula:</strong> Score = 100 − Σ(weight × count × recency_factor) / normalization<br />
-              <strong>Weights:</strong> Pothole=10, Road Damage=8, Missing Signage=7, Waterlogging=6, Damaged Divider=5, Missing Zebra=4<br />
+              <strong>Weights:</strong> Pothole=10, Road Damage=8, Waterlogging=6, Damaged Divider=5<br />
               <strong>Recency:</strong> {'<'}7d = 1.0 | 7-30d = 0.5 | {'>'}30d = 0.2
             </div>
           </div>
@@ -106,7 +106,9 @@ export default function Analytics() {
           {/* Defect breakdown */}
           {roadHealth?.defect_counts && Object.values(roadHealth.defect_counts).some(v => v > 0) && (
             <div className="grid-3" style={{ marginBottom: 20 }}>
-              {Object.entries(roadHealth.defect_counts).map(([type, count]) => (
+              {Object.entries(roadHealth.defect_counts)
+                .filter(([type]) => EVENT_TYPE_LABELS[type]) // Only show types that exist in our labels config
+                .map(([type, count]) => (
                 <div key={type} className="stat-card">
                   <div className="stat-icon" style={{
                     background: `${EVENT_TYPE_COLORS[type] || '#999'}18`,
@@ -116,7 +118,7 @@ export default function Analytics() {
                   </div>
                   <div>
                     <div className="stat-value" style={{ fontSize: '1.5rem' }}>{count}</div>
-                    <div className="stat-label">{EVENT_TYPE_LABELS[type] || type}</div>
+                    <div className="stat-label">{EVENT_TYPE_LABELS[type]}</div>
                   </div>
                 </div>
               ))}
