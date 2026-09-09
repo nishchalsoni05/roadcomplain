@@ -1,7 +1,7 @@
 import { NavLink, Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Camera, Map, FileSearch,
-  History, BarChart3, Settings, Shield, Menu, X, Activity
+  History, BarChart3, Settings, Shield, Menu, X, Activity, Gavel
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -14,6 +14,7 @@ const navItems = [
   { path: '/analytics', label: 'Analytics', Icon: BarChart3 },
   { path: '/traffic-analytics', label: 'Traffic Analytics', Icon: Activity },
   { path: '/settings', label: 'Settings', Icon: Settings },
+  { path: '/actions', label: 'Actions', Icon: Gavel },
 ]
 
 export default function Sidebar() {

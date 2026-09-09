@@ -1,4 +1,5 @@
 import { Routes, Route, useLocation } from 'react-router-dom'
+import { useAuth } from './context/AuthContext'
 import Sidebar from './components/Layout/Sidebar'
 import LandingPage from './pages/LandingPage'
 import Home from './pages/Home'
@@ -16,9 +17,22 @@ import GigwGuidelines from './pages/GigwGuidelines'
 import Login from './pages/Login'
 import HowItWorks from './pages/HowItWorks'
 import AboutMinistry from './pages/AboutMinistry'
+import AdminPortal from './pages/admin/AdminPortal'
+import UserActions from './pages/UserActions'
 
 export default function App() {
   const location = useLocation()
+  const { isAdmin } = useAuth()
+
+  // Admin portal — completely standalone, no sidebar
+  if (location.pathname.startsWith('/admin')) {
+    return (
+      <Routes>
+        <Route path="/admin" element={<AdminPortal />} />
+      </Routes>
+    )
+  }
+
   const isPublicRoute = ['/', '/signup', '/gigw-guidelines', '/login', '/how-it-works', '/about-ministry'].includes(location.pathname)
 
   if (isPublicRoute) {
@@ -49,6 +63,7 @@ export default function App() {
           <Route path="/traffic-analytics" element={<TrafficAnalytics />} />
           <Route path="/trained-data" element={<TrainedData />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/actions" element={<UserActions />} />
         </Routes>
       </main>
     </div>

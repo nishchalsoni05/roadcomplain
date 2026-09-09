@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import './Signup.css';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const handleLogin = (e) => {
     e.preventDefault();
-    // Simulate login success on any password, as requested
-    navigate('/dashboard');
+    const isAdmin = login(email, password);
+    navigate(isAdmin ? '/admin' : '/dashboard');
   };
 
   return (
