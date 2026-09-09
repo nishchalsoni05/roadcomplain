@@ -13,7 +13,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from ..database import AsyncSessionLocal
 from ..models.session import DetectionSession, SourceType, SessionStatus
 from ..ai.pipeline import AIPipeline
-from ..ai.video_source import WebRTCSource
+from ..ai.video_source import WebRTCSource, IPCameraSource
 from ..ai.location_provider import BrowserGeolocationProvider
 from ..services.event_fusion import EventFusionEngine
 from ..services.geocoder import ReverseGeocoder
@@ -59,6 +59,8 @@ async def detection_websocket(websocket: WebSocket):
 
     session_id = None
     processing = False
+    video_source = None
+    ip_camera_task = None
 
     # Register WS callback for pushing new events
     async def push_event(event_msg):
@@ -93,9 +95,16 @@ async def detection_websocket(websocket: WebSocket):
                 if msg_type == "start":
                     # Start a new detection session
                     source_type = msg.get("source_type", "webcam")
+                    
+                    if source_type == "ip_camera":
+                        stream_url = msg.get("url")
+                        video_source = IPCameraSource(stream_url)
+                    else:
+                        video_source = WebRTCSource()
+
                     async with AsyncSessionLocal() as db:
                         session = DetectionSession(
-                            source_type=SourceType(source_type),
+                            source_type=SourceType(source_type) if source_type != "ip_camera" else SourceType.IP_CAMERA,
                             name=f"Live session {datetime.now().strftime('%H:%M:%S')}",
                         )
                         db.add(session)
@@ -111,9 +120,41 @@ async def detection_websocket(websocket: WebSocket):
                         "session_id": str(session_id),
                     })
 
+                    # If IP Camera, we need to actively poll it since frames don't come via WebSocket
+                    if source_type == "ip_camera":
+                        async def poll_ip_camera():
+                            import cv2
+                            import base64
+                            while processing and video_source.is_active:
+                                frame_data = await video_source.get_frame()
+                                if frame_data:
+                                    result = await pipeline.process_frame(frame_data)
+                                    ws_msg = result.to_ws_message()
+                                    
+                                    # Encode frame to send back to UI
+                                    _, buffer = cv2.imencode('.jpg', frame_data.frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                                    ws_msg["frame_image"] = base64.b64encode(buffer).decode('utf-8')
+                                    
+                                    try:
+                                        await websocket.send_json(ws_msg)
+                                    except Exception:
+                                        break
+                                        
+                                    if result.detections or result.intelligence_events or result.plate_readings:
+                                        location = location_provider.get_current()
+                                        async with AsyncSessionLocal() as db_session:
+                                            await fusion.fuse_and_persist(result, location, session_id, db_session)
+                                            
+                                await asyncio.sleep(0.1) # Max 10 FPS
+                        
+                        ip_camera_task = asyncio.create_task(poll_ip_camera())
+
                 elif msg_type == "stop":
                     processing = False
-                    await video_source.stop()
+                    if video_source:
+                        await video_source.stop()
+                    if ip_camera_task:
+                        ip_camera_task.cancel()
                     if session_id:
                         async with AsyncSessionLocal() as db:
                             session = await db.get(DetectionSession, session_id)
@@ -163,7 +204,10 @@ async def detection_websocket(websocket: WebSocket):
             pass
     finally:
         fusion.unregister_ws_callback(push_event)
-        await video_source.stop()
+        if ip_camera_task:
+            ip_camera_task.cancel()
+        if video_source:
+            await video_source.stop()
         await geocoder.close()
         if session_id:
             try:

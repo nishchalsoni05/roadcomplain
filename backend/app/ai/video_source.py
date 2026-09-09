@@ -124,7 +124,7 @@ class WebRTCSource(VideoSource):
 class IPCameraSource(VideoSource):
     """
     Connects to an IP camera stream (RTSP/HTTP) via OpenCV.
-    The phone runs an IP camera app that exposes a stream URL.
+    Uses a background thread to continuously pull frames to prevent OpenCV buffer lag.
     """
 
     def __init__(self, stream_url: str):
@@ -132,6 +132,17 @@ class IPCameraSource(VideoSource):
         self._capture: Optional[cv2.VideoCapture] = None
         self._frame_count = 0
         self._active = False
+        self._latest_frame = None
+        self._thread = None
+
+    def _update_frames(self):
+        """Continuously pulls frames as fast as possible to prevent buffer buildup."""
+        while self._active and self._capture and self._capture.isOpened():
+            ret, frame = self._capture.read()
+            if ret:
+                self._latest_frame = frame
+            else:
+                time.sleep(0.01)
 
     async def start(self):
         """Connect to the IP camera stream."""
@@ -141,28 +152,36 @@ class IPCameraSource(VideoSource):
         )
         if not self._capture.isOpened():
             raise ConnectionError(f"Cannot connect to IP camera at {self._stream_url}")
+        
+        # Try to minimize buffer at the OpenCV level as well
+        self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
         self._active = True
         self._frame_count = 0
+        
+        # Start background thread to keep buffer empty
+        import threading
+        self._thread = threading.Thread(target=self._update_frames, daemon=True)
+        self._thread.start()
+        
         logger.info(f"IP camera source connected: {self._stream_url}")
 
     async def stop(self):
+        self._active = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
         if self._capture:
             self._capture.release()
-        self._active = False
         logger.info("IP camera source stopped")
 
     async def get_frame(self) -> Optional[FrameData]:
-        if not self._capture or not self._capture.isOpened():
+        if not self._active or self._latest_frame is None:
             return None
 
-        loop = asyncio.get_event_loop()
-        ret, frame = await loop.run_in_executor(
-            None, self._capture.read
-        )
-        if not ret:
-            return None
-
+        # Grab the absolute latest frame
+        frame = self._latest_frame.copy()
         self._frame_count += 1
+        
         return FrameData(
             frame=frame,
             frame_number=self._frame_count,

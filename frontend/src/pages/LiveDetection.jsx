@@ -15,8 +15,12 @@ export default function LiveDetection() {
   const [devices, setDevices] = useState([])
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
   const [videoDimensions, setVideoDimensions] = useState({ w: 0, h: 0 })
+  const [useIpCamera, setUseIpCamera] = useState(false)
+  const [ipCameraUrl, setIpCameraUrl] = useState('http://100.x.x.x:8080/video')
+  const [ipFrameBase64, setIpFrameBase64] = useState(null)
 
   const videoRef = useRef(null)
+  const imgRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const intervalRef = useRef(null)
@@ -129,19 +133,30 @@ export default function LiveDetection() {
         wsRef.current.close()
       }
       stopCamera()
+      setIpFrameBase64(null)
     } else {
-      const success = await startCamera()
-      if (!success) return;
+      if (!useIpCamera) {
+        const success = await startCamera()
+        if (!success) return;
+      }
       
       setIsDetecting(true)
       
       wsRef.current = new WSClient(`/ws/detect`, {
         onOpen: () => {
           setWsConnected(true)
-          wsRef.current.send({
-            type: 'start',
-            source_type: 'webcam'
-          })
+          if (useIpCamera) {
+            wsRef.current.send({
+              type: 'start',
+              source_type: 'ip_camera',
+              url: ipCameraUrl
+            })
+          } else {
+            wsRef.current.send({
+              type: 'start',
+              source_type: 'webcam'
+            })
+          }
 
           if ('geolocation' in navigator) {
             watchIdRef.current = navigator.geolocation.watchPosition(
@@ -172,25 +187,32 @@ export default function LiveDetection() {
             setSessionId(msg.session_id)
           } else if (msg.type === 'detection_result' || msg.type === 'new_event') {
             updateDetections(msg)
+            if (msg.frame_image) {
+              setIpFrameBase64(`data:image/jpeg;base64,${msg.frame_image}`)
+              // For IP camera, we use a fixed aspect ratio assumption or update dimensions dynamically
+              if (videoDimensions.w === 0) setVideoDimensions({ w: 1280, h: 720 }) 
+            }
           }
         }
       })
       wsRef.current.connect()
 
-      intervalRef.current = setInterval(() => {
-        if (videoRef.current && canvasRef.current && wsRef.current?.isConnected) {
-          const ctx = canvasRef.current.getContext('2d')
-          canvasRef.current.width = videoRef.current.videoWidth
-          canvasRef.current.height = videoRef.current.videoHeight
-          ctx.drawImage(videoRef.current, 0, 0)
-          const b64 = canvasRef.current.toDataURL('image/jpeg', 0.5)
-          wsRef.current.send({
-            type: 'frame',
-            data: b64,
-            timestamp: new Date().toISOString()
-          })
-        }
-      }, 1000 / 5) // 5 FPS
+      if (!useIpCamera) {
+        intervalRef.current = setInterval(() => {
+          if (videoRef.current && canvasRef.current && wsRef.current?.isConnected) {
+            const ctx = canvasRef.current.getContext('2d')
+            canvasRef.current.width = videoRef.current.videoWidth
+            canvasRef.current.height = videoRef.current.videoHeight
+            ctx.drawImage(videoRef.current, 0, 0)
+            const b64 = canvasRef.current.toDataURL('image/jpeg', 0.5)
+            wsRef.current.send({
+              type: 'frame',
+              data: b64,
+              timestamp: new Date().toISOString()
+            })
+          }
+        }, 1000 / 5) // 5 FPS
+      }
     }
   }
 
@@ -205,18 +227,41 @@ export default function LiveDetection() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 className="card-title">Camera Feed</h3>
             
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <select 
                 className="input" 
-                style={{ padding: '8px', maxWidth: '200px' }}
-                value={selectedDeviceId}
-                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                style={{ padding: '8px', maxWidth: '160px' }}
+                value={useIpCamera ? 'ip_camera' : 'webcam'}
+                onChange={(e) => setUseIpCamera(e.target.value === 'ip_camera')}
                 disabled={isDetecting}
               >
-                {devices.map(d => (
-                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0,5)}`}</option>
-                ))}
+                <option value="webcam">Local Webcam</option>
+                <option value="ip_camera">External IP Camera</option>
               </select>
+
+              {!useIpCamera ? (
+                <select 
+                  className="input" 
+                  style={{ padding: '8px', maxWidth: '200px' }}
+                  value={selectedDeviceId}
+                  onChange={(e) => setSelectedDeviceId(e.target.value)}
+                  disabled={isDetecting}
+                >
+                  {devices.map(d => (
+                    <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0,5)}`}</option>
+                  ))}
+                </select>
+              ) : (
+                <input 
+                  type="text" 
+                  className="input" 
+                  style={{ padding: '8px', width: '250px' }}
+                  placeholder="http://100.x.x.x:8080/video"
+                  value={ipCameraUrl}
+                  onChange={(e) => setIpCameraUrl(e.target.value)}
+                  disabled={isDetecting}
+                />
+              )}
               
               <button className={`btn ${isDetecting ? 'btn-outline' : 'btn-primary'}`} onClick={toggleDetection}>
                 {isDetecting ? <StopCircle size={16} /> : <Play size={16} />}
@@ -226,21 +271,38 @@ export default function LiveDetection() {
           </div>
           
           <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', background: '#000', borderRadius: 8, overflow: 'hidden' }}>
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              playsInline 
-              muted 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-              onLoadedMetadata={() => {
-                if (videoRef.current) {
-                  setVideoDimensions({
-                    w: videoRef.current.videoWidth,
-                    h: videoRef.current.videoHeight
-                  })
-                }
-              }}
-            />
+            {!useIpCamera ? (
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                muted 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                onLoadedMetadata={() => {
+                  if (videoRef.current) {
+                    setVideoDimensions({
+                      w: videoRef.current.videoWidth,
+                      h: videoRef.current.videoHeight
+                    })
+                  }
+                }}
+              />
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
+                {ipFrameBase64 ? (
+                  <img 
+                    ref={imgRef}
+                    src={ipFrameBase64} 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    alt="IP Camera Stream"
+                  />
+                ) : (
+                  <div style={{ color: '#666' }}>
+                    {isDetecting ? "Connecting to IP Camera stream..." : "IP Camera stream will appear here"}
+                  </div>
+                )}
+              </div>
+            )}
             <canvas ref={canvasRef} style={{ display: 'none' }} />
             
             {/* Bounding Box Overlay */}
